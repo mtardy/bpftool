@@ -117,8 +117,8 @@ version of the LLVM library installed on the system:
     ```console
     $ git clone https://github.com/llvm/llvm-project.git
     $ mkdir llvm_build
-    $ cmake -S llvm-project/llvm -B llvm_build -DCMAKE_BUILD_TYPE=Release
-    $ make -j -C llvm_build llvm-config llvm-libraries
+    $ cmake -S llvm-project/llvm -B llvm_build -DCMAKE_BUILD_TYPE=Release -DLLVM_TARGETS_TO_BUILD=BPF
+    $ make -j $(nproc) -C llvm_build llvm-config llvm-libraries
     ```
 
 2.  Build bpftool with `EXTRA_CFLAGS` set to `--static`, and by passing the path to
@@ -126,7 +126,7 @@ version of the LLVM library installed on the system:
 
     ```console
     $ cd bpftool
-    $ LLVM_CONFIG=../llvm_build/bin/llvm-config EXTRA_CFLAGS=--static make -j
+    $ LLVM_CONFIG=../../llvm_build/bin/llvm-config EXTRA_CFLAGS=--static make -j $(nproc) -C src
     ```
 
 ### Build bpftool's man pages
