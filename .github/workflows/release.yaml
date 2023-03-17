@@ -1,0 +1,127 @@
+name: Build and release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+env:
+  # https://github.com/llvm/llvm-project/releases/tag/llvmorg-15.0.0
+  LLVM_arm64: clang+llvm-15.0.0-aarch64-linux-gnu
+  LLVM_amd64: clang+llvm-15.0.0-x86_64-linux-gnu-rhel-8.4 
+
+jobs:
+  build:
+    name: Build static bpftool binary
+    runs-on: ubuntu-22.04
+    env:
+      TARGETARCH: ${{ matrix.arch }}
+    strategy:
+      matrix:
+        arch: [arm64, amd64]
+
+    steps:
+      # arm64 build only needs curl to download the LLVM archive
+      - name: Install dependencies (arm64)
+        if: matrix.arch == 'arm64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl 
+
+      # amd64 needs curl and the dependencies to build bpftool
+      - name: Install dependencies (amd64)
+        if: matrix.arch == 'amd64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl git llvm clang gcc pkg-config zlib1g-dev libelf-dev libcap-dev binutils
+
+      # Optimize the download and extract, extraction is the most costly part.
+      # Cache is also downloaded and extracted, but you get a ~1 minute
+      # performance boost. This step is useless if the workflow is triggered
+      # less than every 7 days since cache will be removed, see:
+      # https://docs.github.com/en/actions/using-workflows/caching-dependencies-to-speed-up-workflows#usage-limits-and-eviction-policy
+      - name: Cache for "Download and extract compiled LLVM release"
+        uses: actions/cache@88522ab9f39a2ea568f7027eddc7d8d8bc9d59c8
+        id: cache-llvm
+        env:
+          LLVM: ${{ env[format('LLVM_{0}', matrix.arch)] }}
+        with:
+          path: ${{ env.LLVM }}
+          key: ${{ env.LLVM }}
+
+      - name: Download and extract compiled LLVM release
+        if: steps.cache-llvm.outputs.cache-hit != 'true'
+        env:
+          LLVM: ${{ env[format('LLVM_{0}', matrix.arch)] }}
+        run: |
+          curl -L https://github.com/llvm/llvm-project/releases/download/llvmorg-15.0.0/${{ env.LLVM }}.tar.xz -O
+          tar xvf ${{ env.LLVM }}.tar.xz
+
+      - name: Checkout bpftool code
+        uses: actions/checkout@24cb9080177205b6e8c946b17badbe402adc938f
+        with:
+          submodules: recursive
+          path: 'bpftool'
+
+      - name: Build static bpftool natively for amd64
+        if: matrix.arch == 'amd64'
+        working-directory: 'bpftool'
+        env:
+          LLVM: ${{ env[format('LLVM_{0}', matrix.arch)] }}
+        run: make -j $(nproc) -C src V=1 \ 
+          EXTRA_CFLAGS=--static \
+          LLVM_CONFIG="${GITHUB_WORKSPACE}/${{ env.LLVM }}/bin/llvm-config" \
+          LLVM_STRIP="${GITHUB_WORKSPACE}/${{ env.LLVM }}/bin/llvm-strip"
+
+      - name: Strip binary (amd64)
+        if: matrix.arch == 'amd64'
+        run: strip bpftool/src/bpftool
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@e81a89b1732b9c48d79cd809d8d81d79c4647a18
+        if: matrix.arch == 'arm64'
+        with:
+          platforms: arm64
+
+      # The emulated build leverage Docker and Ubuntu 22.04 container image
+      # distribution to have all the needed arm64 packages.
+      - name: Build static bpftool for arm64 with emulation
+        if: matrix.arch == 'arm64'
+        env:
+          LLVM: ${{ env[format('LLVM_{0}', matrix.arch)] }}
+        run:  |
+          docker run --platform linux/arm64 --rm -v $(pwd):/build ubuntu:22.04 \
+          bash -c "apt-get update && \
+                   apt-get install -y make pkg-config libelf-dev libcap-dev clang gcc llvm binutils && \
+                   cd build/bpftool && \
+                   LLVM_CONFIG=../../${{ env.LLVM }}/bin/llvm-config EXTRA_CFLAGS=--static make -j V=1 -C src && \
+                   strip src/bpftool"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@0b7f8abb1508181956e8e162db84b466c27e18ce
+        with:
+          name: ${{ format('bpftool_{0}', matrix.arch) }}
+          path: bpftool/src/bpftool
+
+  draft-release:
+    name: Create a draft release with artifacts
+    runs-on: ubuntu-22.04
+    needs: build
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifacts from build
+        uses: actions/download-artifact@v2
+
+      - name: Rename binaries and compress
+        run: |
+          tar -C bpftool_amd64 -I 'gzip -9' -cvf bpftool-version-amd64.tar.gz bpftool
+          tar -C bpftool_arm64 -I 'gzip -9' -cvf bpftool-version-arm64.tar.gz bpftool
+          mv bpftool_amd64/bpftool bpftool-amd64
+          mv bpftool_arm64/bpftool bpftool-arm64
+
+      - name: Create draft release and add artifacts
+        uses: softprops/action-gh-release@v1
+        with:
+          draft: true
+          files: bpftool*
