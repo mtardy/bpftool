@@ -104,7 +104,7 @@ jobs:
           path: bpftool/src/bpftool
 
   draft-release:
-    name: Create a draft release with artifacts
+    name: Create a draft release
     runs-on: ubuntu-22.04
     needs: build
     permissions:
@@ -115,8 +115,8 @@ jobs:
 
       - name: Rename binaries and compress
         run: |
-          tar -C bpftool_amd64 -I 'gzip -9' -cvf bpftool-version-amd64.tar.gz bpftool
-          tar -C bpftool_arm64 -I 'gzip -9' -cvf bpftool-version-arm64.tar.gz bpftool
+          tar -C bpftool_amd64 -I 'gzip -9' -cvf bpftool-${{ github.ref_name }}-amd64.tar.gz bpftool
+          tar -C bpftool_arm64 -I 'gzip -9' -cvf bpftool-${{ github.ref_name }}-arm64.tar.gz bpftool
           mv bpftool_amd64/bpftool bpftool-amd64
           mv bpftool_arm64/bpftool bpftool-arm64
 
