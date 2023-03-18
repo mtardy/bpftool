@@ -111,7 +111,7 @@ jobs:
       contents: write
     steps:
       - name: Download artifacts from build
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a
 
       - name: Rename binaries and compress
         run: |
@@ -121,7 +121,7 @@ jobs:
           mv bpftool_arm64/bpftool bpftool-arm64
 
       - name: Create draft release and add artifacts
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844
         with:
           draft: true
           files: bpftool*
